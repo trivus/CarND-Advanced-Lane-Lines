@@ -122,9 +122,9 @@ def pipeline(img):
     gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     hls = cv2.cvtColor(warped, cv2.COLOR_BGR2HLS)
 
-    sobel = mag_thresh(gray, thresh=(15,255))
+    sobel = mag_thresh(gray, thresh=(2.5,255))
     combined = np.zeros_like(sobel)
-    combined[(sobel == 1) & (hls[..., 2] >= 15)] = 1
+    combined[(sobel == 1) & (hls[..., 2] >= 150)] = 1
 
     histogram = np.sum(combined[combined.shape[0] // 2:, ...], axis=0)
     midpoint = np.int(histogram.shape[0] / 2)
@@ -133,6 +133,10 @@ def pipeline(img):
 
     left_ys, left_xs, _ = sliding_window(combined, leftx_base)
     right_ys, right_xs, _ = sliding_window(combined, rightx_base)
+
+    # temp sanity check
+    if len(left_ys) == 0 or len(left_xs) == 0 or len(right_ys) == 0 or len(right_xs) == 0:
+        return img
 
     # Fit a second order polynomial to each
     left_fit = np.polyfit(left_ys, left_xs, 2)
@@ -145,7 +149,7 @@ def pipeline(img):
 
     out_img = weighted_lane(img, combined, Minv, left_fit, right_fit)
     message = 'CurveL: {:.1f} CurveR: {:.1f}   {:.1f}m to {}'.format(curvel, curver, off_v, off_d)
-    cv2.putText(out_img, message, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 2, cv2.LINE_AA)
+    cv2.putText(out_img, message, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,0,0), 2, cv2.LINE_AA)
     return out_img
 
 
