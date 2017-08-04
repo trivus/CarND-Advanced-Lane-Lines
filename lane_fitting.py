@@ -1,14 +1,7 @@
 import numpy as np
-from numpy.polynomial.polynomial import polyval
 import cv2
 from utility import *
-
-class Line():
-    '''
-    Class to save traits of previous line detections
-    '''
-    def __init__(self):
-        self.detected = False
+from collections import deque
 
 
 def sliding_window(img, offset, min_pix=50, margin=100, nwindow=9, out_img=None):
@@ -66,16 +59,15 @@ def car_position_offset(img_size, leftfit, rightfit, x_cvt):
     :return: i.e. ('left', 5)
     """
     bottom = img_size[0]
-    lane_center = (polyval(bottom, leftfit[::-1]) + polyval(bottom, rightfit[::-1])) / 2
+    lane_center = (np.polyval(leftfit, bottom) + np.polyval(rightfit, bottom)) / 2
     img_center = img_size[1] // 2
-    direction = 'left'
-    if lane_center > img_center:
-        direction = 'right'
-    offset = abs(lane_center - img_center) * x_cvt
-    return (direction, offset)
+    offset = (lane_center - img_center) * x_cvt
+    return offset
 
 
 def calculate_curve(x, y, x_cvt, y_cvt, pos=720):
+    if len(x) == 0:
+        return 0
     fit = np.polyfit(y * y_cvt, x * x_cvt, 2)
     curve = ((1 + (2 * fit[0] * pos * y_cvt + fit[1]) ** 2) ** 1.5) \
         / np.absolute(2 * fit[0])
@@ -106,52 +98,153 @@ def weighted_lane(origin_img, bin_img, Minv, left_fit, right_fit):
     return result
 
 
-def pipeline(img):
+def weighted_fitting(rline, lline):
+    '''
+    calibrate fitting coefficients based on pixel counts
+    :param rline: 
+    :param lline: 
+    :return:  
+    '''
+    lane_dist = 480
+    if rline.sanity is False and lline.sanity is False:
+        return None
+    elif rline.sanity is False:
+        lline.fit = np.polyfit(lline.ys, lline.xs, 2)
+        rfit = np.copy(lline.fit)
+        rfit[2] -= lane_dist
+        lfit = lline.fit
+    elif lline.sanity is False:
+        rline.fit = np.polyfit(rline.ys, rline.xs, 2)
+        lfit = np.copy(rline.fit)
+        lfit[2] += lane_dist
+        rfit = rline.fit
+    else:
+        lline.fit = np.polyfit(lline.ys, lline.xs, 2)
+        rline.fit = np.polyfit(rline.ys, rline.xs, 2)
+        loff = lline.fit[2]
+        roff = rline.fit[2]
+        fit = (rline.fit*len(rline.xs) + lline.fit*len(lline.xs)) / (len(rline.xs) + len(lline.xs))
+        rfit = np.copy(fit)
+        rfit[2] = roff
+        lfit = np.copy(fit)
+        lfit[2] = loff
+    return (rfit, lfit)
+
+
+class Line:
+    '''
+    Class to save traits of each line detection
+    '''
+    def __init__(self, xs, ys, x_offset=None, curvature=None, fit=None):
+        # recent bottom x offsets
+        self.x_offsets = x_offset
+        # x, y values for detected line pixels
+        self.xs = xs
+        self.ys = ys
+        if len(xs) < 10:
+            self.sanity = False
+        else:
+            self.sanity = True
+        self.curvature = curvature
+        # polynomial fit
+        self.fit = fit
+
+
+class continuous_pipeline:
     """
-    pipeline function for undistort, binarize, fit and output process
-    :param img: BGR format
-    :return: 
+    wrapper class of pipeline for movie processing 
     """
-    # Define conversions in x and y from pixels space to meters
-    ym_per_pix = 30 / 720  # meters per pixel in y dimension
-    xm_per_pix = 3.7 / 520  # meters per pixel in x dimension
+    def __init__(self, n_buffer=5):
+        self.n_buffer = n_buffer
+        self.rlines = deque(maxlen=self.n_buffer)
+        self.llines = deque(maxlen=self.n_buffer)
 
-    M, warped = get_birdview(img)
-    Minv = np.linalg.inv(M)
+        self.curve = deque(maxlen=self.n_buffer)
+        self.offset = deque(maxlen=self.n_buffer)
+        self.bad_frame_count = 0
 
-    gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-    hls = cv2.cvtColor(warped, cv2.COLOR_BGR2HLS)
+    def get_curve(self):
+        return sum(self.curve) / self.n_buffer
 
-    sobel = mag_thresh(gray, thresh=(2.5,255))
-    combined = np.zeros_like(sobel)
-    combined[(sobel == 1) & (hls[..., 2] >= 150)] = 1
+    def get_offset(self):
+        off_value = sum(self.offset) / self.n_buffer
+        off_dir = 'left'
+        if off_value > 0:
+            off_dir = 'right'
+        return off_dir, off_value
 
-    histogram = np.sum(combined[combined.shape[0] // 2:, ...], axis=0)
-    midpoint = np.int(histogram.shape[0] / 2)
-    leftx_base = np.argmax(histogram[:midpoint])
-    rightx_base = np.argmax(histogram[midpoint:]) + midpoint
+    def reset(self):
+        self.rlines.clear()
+        self.llines.clear()
+        self.curve.clear()
+        self.offset.clear()
+        self.bad_frame_count = 0
 
-    left_ys, left_xs, _ = sliding_window(combined, leftx_base)
-    right_ys, right_xs, _ = sliding_window(combined, rightx_base)
+    def pipeline(self, img):
+        """
+        pipeline function for undistort, binarize, fit and output process
+        :param img: BGR format
+        :return: 
+        """
+        # Define conversions in x and y from pixels space to meters
+        ym_per_pix = 30 / 720  # meters per pixel in y dimension
+        xm_per_pix = 3.7 / 500  # meters per pixel in x dimension
 
-    # temp sanity check
-    if len(left_ys) == 0 or len(left_xs) == 0 or len(right_ys) == 0 or len(right_xs) == 0:
-        return img
+        # transform to bird view
+        M, warped = get_birdview(img)
+        Minv = np.linalg.inv(M)
 
-    # Fit a second order polynomial to each
-    left_fit = np.polyfit(left_ys, left_xs, 2)
-    right_fit = np.polyfit(right_ys, right_xs, 2)
+        # binarize
+        gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+        hls = cv2.cvtColor(warped, cv2.COLOR_BGR2HLS)
+        sobel = mag_thresh(gray, thresh=(5, 255))
+        combined = np.zeros_like(sobel)
+        combined[(sobel == 1) & (hls[..., 2] >= 80)] = 1
 
-    curvel = calculate_curve(left_xs, left_ys, xm_per_pix, ym_per_pix)
-    curver = calculate_curve(right_xs, right_ys, xm_per_pix, ym_per_pix)
+        # initialize window position
+        if self.bad_frame_count >= self.n_buffer:
+            self.reset()
+        if len(self.llines) > 0:
+            leftx_base = self.llines[-1].x_offset
+            rightx_base = self.rlines[-1].x_offset
+        else:
+            # find lane
+            histogram = np.sum(combined[combined.shape[0] // 2:, ...], axis=0)
+            midpoint = np.int(histogram.shape[0] / 2)
+            leftx_base = np.argmax(histogram[:midpoint])
+            rightx_base = np.argmax(histogram[midpoint:]) + midpoint
 
-    off_d, off_v = car_position_offset(combined.shape, left_fit, right_fit, xm_per_pix)
+        left_ys, left_xs, _ = sliding_window(combined, leftx_base)
+        right_ys, right_xs, _ = sliding_window(combined, rightx_base)
 
-    out_img = weighted_lane(img, combined, Minv, left_fit, right_fit)
-    message = 'CurveL: {:.1f} CurveR: {:.1f}   {:.1f}m to {}'.format(curvel, curver, off_v, off_d)
-    cv2.putText(out_img, message, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,0,0), 2, cv2.LINE_AA)
-    return out_img
+        lline = Line(left_xs, left_ys, x_offset=leftx_base)
+        rline = Line(right_xs, right_ys, x_offset=rightx_base)
 
+        current_fits = weighted_fitting(lline, rline)
 
+        if current_fits is None:
+            self.bad_frame_count += 1
+            # change to return prev lane
+            return img
 
+        # Fit a second order polynomial to each
+        # use images with both lines intact
+        left_fit = current_fits[1]
+        right_fit = current_fits[0]
 
+        curvel = calculate_curve(left_xs, left_ys, xm_per_pix, ym_per_pix)
+        curver = calculate_curve(right_xs, right_ys, xm_per_pix, ym_per_pix)
+
+        # update line instance
+        lline.curvature = curvel
+        rline.curvature = curver
+
+        # weighted mean curve based on pixel count
+        self.curve.append((curvel * len(left_xs) + curver * len(right_xs)) / (len(left_xs) + len(right_xs)))
+        self.offset.append(car_position_offset(combined.shape, left_fit, right_fit, xm_per_pix))
+        out_img = weighted_lane(img, combined, Minv, left_fit, right_fit)
+        off_d, off_v = self.get_offset()
+        message = 'Curve: {:.1f}  {:.1f}m to {}'.format(self.get_curve(), abs(off_v), off_d)
+        cv2.putText(out_img, message, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+        self.bad_frame_count = 0
+        return out_img
