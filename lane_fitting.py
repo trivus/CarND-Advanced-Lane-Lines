@@ -4,15 +4,15 @@ from utility import *
 from collections import deque
 
 
-def sliding_window(img, offset, min_pix=50, margin=100, nwindow=9, out_img=None):
+def sliding_window(img, offsets, min_pix=5, margin=50, nwindow=9, out_img=None):
     """
     get hot pixels using sliding window method on binarized image
     :param img: binarized image 
-    :param offset: offset for window. 
     :param min_pix: min pixel count for altering window offset
     :param margin: left right search margin
     :param nwindow: vertical window count
     :param out_img: output img for visualization
+    :param offsets: previous offset of each windows
     :return: list of x, y coordinates of hot pixels, output_image for visualization
     """
     window_height = img.shape[0] // nwindow
@@ -25,12 +25,14 @@ def sliding_window(img, offset, min_pix=50, margin=100, nwindow=9, out_img=None)
     if out_img is None:
         out_img = np.dstack((img, img, img)) * 255
 
+    new_offsets = []
+
     for window in range(nwindow):
         # get window boundaries
         bottom = img.shape[0] - (window + 1) * window_height
         top = bottom + window_height
-        left = offset - margin
-        right = offset + margin
+        left = offsets[window] - margin
+        right = offsets[window] + margin
 
         # draw rectangle for window
         cv2.rectangle(out_img, (left, bottom), (right, top), (0, 255, 0), 2)
@@ -42,10 +44,16 @@ def sliding_window(img, offset, min_pix=50, margin=100, nwindow=9, out_img=None)
 
         if len(good_idx) > min_pix:
             offset = np.int(np.mean(nonzerox[good_idx]))
+            new_offsets.append(offset)
+        else:
+            new_offsets.append(offsets[window])
+
+        if len(offsets) < window + 2:
+            offsets.append(new_offsets[-1])
 
     y_coords = nonzeroy[lane_idx]
     x_coords = nonzerox[lane_idx]
-    return y_coords, x_coords, out_img
+    return y_coords, x_coords, out_img, new_offsets
 
 
 def car_position_offset(img_size, leftfit, rightfit, x_cvt):
@@ -56,8 +64,10 @@ def car_position_offset(img_size, leftfit, rightfit, x_cvt):
     :param rightfit: coefficients from numpy polyfit, right lane
     :param x_cvt: picture to world conversion ratio
     :param y_cvt: 
-    :return: i.e. ('left', 5)
+    :return: offset value. Sign + is left
     """
+    if leftfit is None or rightfit is None:
+        return 0
     bottom = img_size[0]
     lane_center = (np.polyval(leftfit, bottom) + np.polyval(rightfit, bottom)) / 2
     img_center = img_size[1] // 2
@@ -75,6 +85,8 @@ def calculate_curve(x, y, x_cvt, y_cvt, pos=720):
 
 
 def weighted_lane(origin_img, bin_img, Minv, left_fit, right_fit):
+    if left_fit is None or right_fit is None:
+        return origin_img
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(bin_img).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
@@ -96,18 +108,6 @@ def weighted_lane(origin_img, bin_img, Minv, left_fit, right_fit):
     # Combine the result with the original image
     result = cv2.addWeighted(origin_img, 1, newwarp, 0.3, 0)
     return result
-
-
-def lane_fitting(rline, lline):
-    '''
-    calibrate fitting coefficients based on pixel counts
-    :param rline:
-    :param lline:
-    :return:
-    '''
-    lline.fit = np.polyfit(lline.ys, lline.xs, 2)
-    rline.fit = np.polyfit(rline.ys, rline.xs, 2)
-    return (rline.fit, lline.fit)
 
 
 def debug_img(result_img, gray, s_channel, binarized):
@@ -137,21 +137,49 @@ def remove_shadow(img):
 
 class Line:
     '''
-    Class to save traits of each line detection
+    Class to save traits of each line detection.
+    Includes simple sanity check.
     '''
-    def __init__(self, xs, ys, x_offset=None, curvature=None, fit=None):
-        # recent bottom x offsets
-        self.x_offsets = x_offset
-        # x, y values for detected line pixels
-        self.xs = xs
-        self.ys = ys
-        if len(xs) < 5:
-            self.sanity = False
-        else:
-            self.sanity = True
-        self.curvature = curvature
+    def __init__(self, x_offset=None, fit=None, n_buffer=5):
+        # recent bottom x offset
+        self.x_offset = x_offset
         # polynomial fit
         self.fit = fit
+        self.allxs = deque(maxlen=n_buffer)
+        self.allys = deque(maxlen=n_buffer)
+        self.bad_frame_count = 0
+
+    def update(self, xs, ys, offset):
+        if len(xs) < 5:
+            self.bad_frame_count += 1
+            if self.bad_frame_count > 5:
+                self.allxs.clear()
+                self.allys.clear()
+
+        else:
+            self.bad_frame_count = 0
+            self.allxs.append(xs)
+            self.allys.append(ys)
+            self.x_offset = offset
+
+    def get_points(self):
+        getx, gety = [], []
+        for x in self.allxs:
+            getx.extend(x)
+        for y in self.allys:
+            gety.extend(y)
+        return getx, gety
+
+
+    # TODO: enhance sanity.
+    def sanity(self):
+        return len(self.allxs) > 0
+
+    def get_fit(self):
+        if self.sanity() is True:
+            xs, ys = self.get_points()
+            self.fit = np.polyfit(ys, xs, 2)
+        return self.fit
 
 
 class continuous_pipeline:
@@ -159,33 +187,11 @@ class continuous_pipeline:
     wrapper class of pipeline for movie processing 
     """
     def __init__(self, binarize_function, n_buffer=5):
-        self.n_buffer = n_buffer
-        self.rlines = deque(maxlen=self.n_buffer)
-        self.llines = deque(maxlen=self.n_buffer)
-
-        self.curve = deque(maxlen=self.n_buffer)
-        self.offset = deque(maxlen=self.n_buffer)
-        self.bad_frame_count = 0
+        self.rline = Line(n_buffer=n_buffer)
+        self.lline = Line(n_buffer=n_buffer)
         self.binarize_function = binarize_function
 
-    def get_curve(self):
-        return sum(self.curve) / self.n_buffer
-
-    def get_offset(self):
-        off_value = sum(self.offset) / self.n_buffer
-        off_dir = 'left'
-        if off_value > 0:
-            off_dir = 'right'
-        return off_dir, off_value
-
-    def reset(self):
-        self.rlines.clear()
-        self.llines.clear()
-        self.curve.clear()
-        self.offset.clear()
-        self.bad_frame_count = 0
-
-    def pipeline(self, img, debug=False):
+    def pipeline(self, img, debug=True):
         """
         pipeline function for undistort, binarize, fit and output process
         :param img: BGR format
@@ -209,51 +215,42 @@ class continuous_pipeline:
         combined = self.binarize_function(gray, hls)
 
         # initialize window position
-        if self.bad_frame_count >= self.n_buffer:
-            self.reset()
-        if len(self.llines) > 0:
-            leftx_base = self.llines[-1].x_offset
-            rightx_base = self.rlines[-1].x_offset
+        if self.lline.x_offset is not None:
+            leftx_base = self.lline.x_offset
+            rightx_base = self.rline.x_offset
         else:
             # find lane
             histogram = np.sum(combined[combined.shape[0] // 2:, ...], axis=0)
             midpoint = np.int(histogram.shape[0] / 2)
-            leftx_base = np.argmax(histogram[:midpoint])
-            rightx_base = np.argmax(histogram[midpoint:]) + midpoint
+            leftx_base = [np.argmax(histogram[:midpoint])]
+            rightx_base = [np.argmax(histogram[midpoint:]) + midpoint]
 
-        left_ys, left_xs, _ = sliding_window(combined, leftx_base)
-        right_ys, right_xs, _ = sliding_window(combined, rightx_base)
-
-        lline = Line(left_xs, left_ys, x_offset=leftx_base)
-        rline = Line(right_xs, right_ys, x_offset=rightx_base)
-
-        current_fits = lane_fitting(lline, rline)
-
-        if current_fits is None:
-            self.bad_frame_count += 1
-            # change to return prev lane
-            return img
-
-        # Fit a second order polynomial to each
-        # use images with both lines intact
-        left_fit = current_fits[1]
-        right_fit = current_fits[0]
+        left_ys, left_xs, _, l_offsets = sliding_window(combined, leftx_base)
+        right_ys, right_xs, _, r_offsets = sliding_window(combined, rightx_base)
 
         curvel = calculate_curve(left_xs, left_ys, xm_per_pix, ym_per_pix)
         curver = calculate_curve(right_xs, right_ys, xm_per_pix, ym_per_pix)
 
-        # update line instance
-        lline.curvature = curvel
-        rline.curvature = curver
+        # sanity checks
+        if r_offsets[0] - l_offsets[0] < 300:
+            left_xs = None
+            right_xs = None
+
+        self.lline.update(left_xs, left_ys, l_offsets)
+        self.rline.update(right_xs, right_ys, r_offsets)
+
+        left_fit = self.lline.get_fit()
+        right_fit = self.rline.get_fit()
 
         # weighted mean curve based on pixel count
-        self.curve.append((curvel * len(left_xs) + curver * len(right_xs)) / (len(left_xs) + len(right_xs)))
-        self.offset.append(car_position_offset(combined.shape, left_fit, right_fit, xm_per_pix))
+        curve = (curvel * len(left_xs) + curver * len(right_xs)) / (len(left_xs) + len(right_xs))
+        offset = car_position_offset(combined.shape, left_fit, right_fit, xm_per_pix)
         out_img = weighted_lane(img, combined, Minv, left_fit, right_fit)
-        off_d, off_v = self.get_offset()
-        message = 'Curve: {:.1f}  {:.1f}m to {}'.format(self.get_curve(), abs(off_v), off_d)
+
+        # get offset direction
+        off_d = 'right' if offset < 0 else 'left'
+        message = 'Curve: {:.1f}  {:.1f}m to {}'.format(curve, abs(offset), off_d)
         cv2.putText(out_img, message, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
-        self.bad_frame_count = 0
 
         # DEBUG
         if debug:

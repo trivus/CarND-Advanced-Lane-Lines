@@ -102,13 +102,13 @@ def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi/2)):
     return dir_binary
 
 
+def yellow_mask(img):
+    yellow_lower = np.array([18, 50, 30])
+    yellow_upper = np.array([50, 200, 255])
+    return cv2.inRange(img, yellow_lower, yellow_upper) // 255
+
+
 def white_mask(img, sensitivity=50):
-    lower = np.array([0, 255 - sensitivity, 0])
+    lower = np.array([15, 255 - sensitivity, 0])
     upper = np.array([255, 255, 255])
     return cv2.inRange(img, lower, upper) // 255
-
-
-def yellow_mask(img):
-    yellow_lower = np.array([15, 50, 30])
-    yellow_upper = np.array([25, 200, 255])
-    return cv2.inRange(img, yellow_lower, yellow_upper) // 255
