@@ -131,6 +131,23 @@ def weighted_fitting(rline, lline):
     return (rfit, lfit)
 
 
+def debug_img(result_img, gray, s_channel, binarized):
+    """
+    Combine img output during process for debugging purposes
+    :param result_img: original output image
+    :param gray: gray scaled image
+    :param s_channel: s channel from HLS format
+    :param binarized: the result of binarization 
+    :return: debug image
+    """
+    output = np.zeros((1080, 1280, 3), dtype=np.uint8)
+    output[0:720, 0:1280, :] = cv2.resize(result_img, (1280, 720))
+    output[-240:, :320, :] = cv2.resize(cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB), (320, 240))
+    output[-240:, 320:640, :] = cv2.resize(cv2.cvtColor(s_channel, cv2.COLOR_GRAY2RGB), (320, 240))
+    output[-240:, 640:960, :] = cv2.resize(cv2.cvtColor(binarized, cv2.COLOR_GRAY2RGB), (320, 240))
+    return output
+
+
 class Line:
     '''
     Class to save traits of each line detection
@@ -154,7 +171,7 @@ class continuous_pipeline:
     """
     wrapper class of pipeline for movie processing 
     """
-    def __init__(self, n_buffer=5):
+    def __init__(self, binarize_function, n_buffer=5):
         self.n_buffer = n_buffer
         self.rlines = deque(maxlen=self.n_buffer)
         self.llines = deque(maxlen=self.n_buffer)
@@ -162,6 +179,7 @@ class continuous_pipeline:
         self.curve = deque(maxlen=self.n_buffer)
         self.offset = deque(maxlen=self.n_buffer)
         self.bad_frame_count = 0
+        self.binarize_function = binarize_function
 
     def get_curve(self):
         return sum(self.curve) / self.n_buffer
@@ -180,7 +198,7 @@ class continuous_pipeline:
         self.offset.clear()
         self.bad_frame_count = 0
 
-    def pipeline(self, img):
+    def pipeline(self, img, debug=False):
         """
         pipeline function for undistort, binarize, fit and output process
         :param img: BGR format
@@ -197,9 +215,8 @@ class continuous_pipeline:
         # binarize
         gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
         hls = cv2.cvtColor(warped, cv2.COLOR_BGR2HLS)
-        sobel = mag_thresh(gray, thresh=(5, 255))
-        combined = np.zeros_like(sobel)
-        combined[(sobel == 1) & (hls[..., 2] >= 80)] = 1
+
+        combined = self.binarize_function(gray, hls)
 
         # initialize window position
         if self.bad_frame_count >= self.n_buffer:
@@ -247,4 +264,8 @@ class continuous_pipeline:
         message = 'Curve: {:.1f}  {:.1f}m to {}'.format(self.get_curve(), abs(off_v), off_d)
         cv2.putText(out_img, message, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
         self.bad_frame_count = 0
+
+        # DEBUG
+        if debug:
+            out_img = debug_img(out_img, gray, hls[..., 2], combined * 255)
         return out_img
