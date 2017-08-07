@@ -98,41 +98,20 @@ def weighted_lane(origin_img, bin_img, Minv, left_fit, right_fit):
     return result
 
 
-def weighted_fitting(rline, lline):
+def lane_fitting(rline, lline):
     '''
     calibrate fitting coefficients based on pixel counts
-    :param rline: 
-    :param lline: 
-    :return:  
+    :param rline:
+    :param lline:
+    :return:
     '''
-    lane_dist = 480
-    if rline.sanity is False and lline.sanity is False:
-        return None
-    elif rline.sanity is False:
-        lline.fit = np.polyfit(lline.ys, lline.xs, 2)
-        rfit = np.copy(lline.fit)
-        rfit[2] -= lane_dist
-        lfit = lline.fit
-    elif lline.sanity is False:
-        rline.fit = np.polyfit(rline.ys, rline.xs, 2)
-        lfit = np.copy(rline.fit)
-        lfit[2] += lane_dist
-        rfit = rline.fit
-    else:
-        lline.fit = np.polyfit(lline.ys, lline.xs, 2)
-        rline.fit = np.polyfit(rline.ys, rline.xs, 2)
-        loff = lline.fit[2]
-        roff = rline.fit[2]
-        fit = (rline.fit*len(rline.xs) + lline.fit*len(lline.xs)) / (len(rline.xs) + len(lline.xs))
-        rfit = np.copy(fit)
-        rfit[2] = roff
-        lfit = np.copy(fit)
-        lfit[2] = loff
-    return (rfit, lfit)
+    lline.fit = np.polyfit(lline.ys, lline.xs, 2)
+    rline.fit = np.polyfit(rline.ys, rline.xs, 2)
+    return (rline.fit, lline.fit)
 
 
 def debug_img(result_img, gray, s_channel, binarized):
-    """
+    """`
     Combine img output during process for debugging purposes
     :param result_img: original output image
     :param gray: gray scaled image
@@ -148,6 +127,14 @@ def debug_img(result_img, gray, s_channel, binarized):
     return output
 
 
+def remove_shadow(img):
+    yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    yuv[..., 0] = clahe.apply(yuv[..., 0])
+    yuv = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
+    return yuv
+
+
 class Line:
     '''
     Class to save traits of each line detection
@@ -158,7 +145,7 @@ class Line:
         # x, y values for detected line pixels
         self.xs = xs
         self.ys = ys
-        if len(xs) < 10:
+        if len(xs) < 5:
             self.sanity = False
         else:
             self.sanity = True
@@ -208,6 +195,9 @@ class continuous_pipeline:
         ym_per_pix = 30 / 720  # meters per pixel in y dimension
         xm_per_pix = 3.7 / 500  # meters per pixel in x dimension
 
+        # remove shadow
+        #img = remove_shadow(img)
+
         # transform to bird view
         M, warped = get_birdview(img)
         Minv = np.linalg.inv(M)
@@ -237,7 +227,7 @@ class continuous_pipeline:
         lline = Line(left_xs, left_ys, x_offset=leftx_base)
         rline = Line(right_xs, right_ys, x_offset=rightx_base)
 
-        current_fits = weighted_fitting(lline, rline)
+        current_fits = lane_fitting(lline, rline)
 
         if current_fits is None:
             self.bad_frame_count += 1

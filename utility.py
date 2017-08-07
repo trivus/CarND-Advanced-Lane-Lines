@@ -109,6 +109,6 @@ def white_mask(img, sensitivity=50):
 
 
 def yellow_mask(img):
-    yellow_lower = np.array([15, 50, 100])
+    yellow_lower = np.array([15, 50, 30])
     yellow_upper = np.array([25, 200, 255])
     return cv2.inRange(img, yellow_lower, yellow_upper) // 255
