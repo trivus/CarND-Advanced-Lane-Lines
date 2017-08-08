@@ -232,9 +232,12 @@ class continuous_pipeline:
         curver = calculate_curve(right_xs, right_ys, xm_per_pix, ym_per_pix)
 
         # sanity checks
-        if r_offsets[0] - l_offsets[0] < 300:
-            left_xs = None
-            right_xs = None
+        if min(np.subtract(r_offsets, l_offsets)) < 200 or max(np.subtract(r_offsets, l_offsets)) > 800:
+            left_xs = []
+            left_ys = []
+            right_xs = []
+            right_ys = []
+
 
         self.lline.update(left_xs, left_ys, l_offsets)
         self.rline.update(right_xs, right_ys, r_offsets)
@@ -243,7 +246,7 @@ class continuous_pipeline:
         right_fit = self.rline.get_fit()
 
         # weighted mean curve based on pixel count
-        curve = (curvel * len(left_xs) + curver * len(right_xs)) / (len(left_xs) + len(right_xs))
+        curve = (curvel * len(left_xs) + curver * len(right_xs)) / (len(left_xs) + len(right_xs) + 1)
         offset = car_position_offset(combined.shape, left_fit, right_fit, xm_per_pix)
         out_img = weighted_lane(img, combined, Minv, left_fit, right_fit)
 

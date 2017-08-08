@@ -59,8 +59,9 @@ def get_birdview(img, m_path='m.pkl', mtx_path='mtx.pkl', dist_path='dist.pkl'):
         # the coordinates were created by eye-inspecting sample pictures.
         #src = np.float32([[560, 477], [725, 477], [1035, 675], [271, 675]])
         #src = np.float32([[582, 462], [702, 462], [1035, 675], [271, 675]])
-        src = np.float32([[578, 462], [702, 462], [1035, 675], [271, 675]])
-        dst = np.float32([[384, 0], [896, 0], [896, 720], [384, 720]])
+        src = np.float32([[559, 480], [734, 480], [1035, 675], [271, 675]])
+        #dst = np.float32([[384, 0], [896, 0], [896, 720], [384, 720]])
+        dst = np.float32([[300, 0], [900, 0], [900, 720], [300, 720]])
         M = cv2.getPerspectiveTransform(src, dst)
         joblib.dump(M, m_path)
 
@@ -103,12 +104,12 @@ def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi/2)):
 
 
 def yellow_mask(img):
-    yellow_lower = np.array([18, 50, 30])
-    yellow_upper = np.array([50, 200, 255])
+    yellow_lower = np.array([10, 00, 30])
+    yellow_upper = np.array([40, 255, 255])
     return cv2.inRange(img, yellow_lower, yellow_upper) // 255
 
 
 def white_mask(img, sensitivity=50):
-    lower = np.array([15, 255 - sensitivity, 0])
+    lower = np.array([0, 255 - sensitivity, 0])
     upper = np.array([255, 255, 255])
     return cv2.inRange(img, lower, upper) // 255
