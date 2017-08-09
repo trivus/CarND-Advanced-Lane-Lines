@@ -42,7 +42,7 @@ def sliding_window(img, offsets, min_pix=5, margin=50, nwindow=9, out_img=None):
                     (left <= nonzerox) & (nonzerox < right)).nonzero()[0]
         lane_idx.extend(good_idx)
 
-        if len(good_idx) > min_pix:
+        if len(good_idx) > min_pix and np.std(nonzerox[good_idx]) < 50:
             offset = np.int(np.mean(nonzerox[good_idx]))
             new_offsets.append(offset)
         else:
