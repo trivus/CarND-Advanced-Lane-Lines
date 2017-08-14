@@ -60,21 +60,12 @@ While applying threshold to S channel from HLS color space worked well on clean 
 
 ```python
 def binary_mask(gray, hls):   
-    white = white_mask(hls, sensitivity=75)
-    yellow = yellow_mask(hls)
-    chan_mask = np.zeros_like(yellow)
-    chan_mask[hls[..., 2] > 180] = 1
+    white = white_mask(hls, sensitivity=50)
+    yellow = yellow_mask(hls, sensitivity=150)
     color_mask = cv2.bitwise_or(white, yellow)
-    if np.sum(color_mask) > 40000:        
-        color_mask = cv2.bitwise_and(color_mask, chan_mask)
-    elif np.sum(color_mask) < 10000 and np.sum(chan_mask) < 20000:
-        color_mask = cv2.bitwise_or(color_mask, chan_mask)
-    else:
-        color_mask = cv2.bitwise_or(color_mask, chan_mask)    
-    combined = abs_sobel_thresh(color_mask, 'x', sobel_kernel=5, thresh=(15, 255))       
-    combined[:, :300] = 0
-    combined[:, 1100:] = 0 
-    return combined
+    color_mask[:, :300] = 0
+    color_mask[:, 1100:] = 0 
+    return color_mask
 ```
 
 ![alt text][image3]
