@@ -98,6 +98,7 @@ I wrote `continuous_pipeline()` in `lane_fitting.py`, lines 185 to 261 to proces
 The result can be seen at:
 
 [project_movie](https://github.com/trivus/CarND-Advanced-Lane-Lines/blob/master/result.mp4)
+[![youtube link](https://img.youtube.com/vi/szKzvvvDFxM/0.jpg)]
 
 ---
 
