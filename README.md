@@ -97,8 +97,9 @@ I implemented this step in lines 87 through 110 in my code in `lanefitting.py` i
 I wrote `continuous_pipeline()` in `lane_fitting.py`, lines 185 to 261 to process video.  
 The result can be seen at:
 
-[project_movie](https://github.com/trivus/CarND-Advanced-Lane-Lines/blob/master/result.mp4)
-[![youtube link](https://img.youtube.com/vi/szKzvvvDFxM/0.jpg)]
+[project_movie](https://github.com/trivus/CarND-Advanced-Lane-Lines/blob/master/result.mp4)  
+
+[![youtube link](https://img.youtube.com/vi/szKzvvvDFxM/0.jpg)](https://www.youtube.com/watch?v=szKzvvvDFxM)  
 
 ---
 
