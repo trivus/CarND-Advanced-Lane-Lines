@@ -1,19 +1,8 @@
-## Advanced Lane Finding
-[![Udacity - Self-Driving Car NanoDegree](https://s3.amazonaws.com/udacity-sdc/github/shield-carnd.svg)](http://www.udacity.com/drive)
+## Advanced lane detectin using cv
 
-
-In this project, your goal is to write a software pipeline to identify the lane boundaries in a video, but the main output or product we want you to create is a detailed writeup of the project.  Check out the [writeup template](https://github.com/udacity/CarND-Advanced-Lane-Lines/blob/master/writeup_template.md) for this project and use it as a starting point for creating your own writeup.  
-
-Creating a great writeup:
 ---
-A great writeup should include the rubric points as well as your description of how you addressed each point.  You should include a detailed description of the code used in each step (with line-number references and code snippets where necessary), and links to other supporting documents or external references.  You should include images in your writeup to demonstrate how your code works with examples.  
 
-All that said, please be concise!  We're not looking for you to write a book here, just a brief description of how you passed each rubric point, and references to the relevant code :). 
-
-You're not required to use markdown for your writeup.  If you use another method please just submit a pdf of your writeup.
-
-The Project
----
+**Advanced Lane Finding Project**
 
 The goals / steps of this project are the following:
 
@@ -26,10 +15,139 @@ The goals / steps of this project are the following:
 * Warp the detected lane boundaries back onto the original image.
 * Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
 
-The images for camera calibration are stored in the folder called `camera_cal`.  The images in `test_images` are for testing your pipeline on single frames.  If you want to extract more test images from the videos, you can simply use an image writing method like `cv2.imwrite()`, i.e., you can read the video in frame by frame as usual, and for frames you want to save for later you can write to an image file.  
+[//]: # (Image References)
 
-To help the reviewer examine your work, please save examples of the output from each stage of your pipeline in the folder called `ouput_images`, and include a description in your writeup for the project of what each image shows.    The video called `project_video.mp4` is the video your pipeline should work well on.  
+[image1]: ./output_images/undistort.png "Undistorted"
+[image2]: ./output_images/pers_transform.png "Road Transformed"
+[image3]: ./output_images/binarize.png "Binary Example"
+[image4]: ./output_images/curve_fit.png "Curve_fit Example"
+[image5]: ./output_images/out_1.jpg "Output"
+[video1]: ./result.mp4 "Video"
 
-The `challenge_video.mp4` video is an extra (and optional) challenge for you if you want to test your pipeline under somewhat trickier conditions.  The `harder_challenge.mp4` video is another optional challenge and is brutal!
+## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
 
-If you're feeling ambitious (again, totally optional though), don't stop there!  We encourage you to go out and take video of your own, calibrate your camera and show us how you would implement this project from scratch!
+### Here I will consider the rubric points individually and describe how I addressed each point in my implementation.  
+
+---
+
+### Writeup / README
+
+#### 1. Provide a Writeup / README that includes all the rubric points and how you addressed each one.  
+
+You're reading it!
+
+### Camera Calibration
+
+#### 1. Undistort the image
+
+I used opencv library's calibrate function with provided checkboard images to undistort the camera image.  
+I fixed world coordinates of the chess board corners to be every integer coordinates from 6 x 9 grid, on z=0 plane (i.e. (0,0), (1,0), (1,1), ..., (6,9)). I got image points by using `cv2.findChessboardCorners()` and used the image point and world point to calculate camera calibration and distortion coefficients with `cv2.calibrateCamera()`. The last step was to apply undistortion using `cv2.undistort()`.  The code can be found at `calibrate_from_dir` function, lines from 12 to 40 in utility.py.  
+
+![image1]
+
+### Pipeline (single images)
+
+#### 1. Apply distortion-correction and transform image to bird-view.
+
+I used camera calibration matrix and undistortion coefficients calculated using checkboard image to undistort road images.  
+Then I transformed each image with `cv2.getPerspectiveTransform()`. The src and dst coordinates used were obtained by visually inspecting straight lane image. The codes can be found at `get_birdview`, lines from 43 to 69 in utility.py.  
+
+![image2]
+
+#### 2. Binarize the image with color mask and sobel threshold.  
+
+While applying threshold to S channel from HLS color space worked well on clean cases, it was not robust enough to handle shadows. I tested several combinations of color mask and sobel thresholds. The best result I obtained so far was by combining white / yellow color mask, S channel mask, and sobel threshold. Then I clipped the left and right portion of the image to remove noise from other lanes. The codes for masking functions can be found at `utility.py` from line 72 to 115.
+
+```python
+def binary_mask(gray, hls):   
+    white = white_mask(hls, sensitivity=75)
+    yellow = yellow_mask(hls)
+    chan_mask = np.zeros_like(yellow)
+    chan_mask[hls[..., 2] > 180] = 1
+    color_mask = cv2.bitwise_or(white, yellow)
+    if np.sum(color_mask) > 40000:        
+        color_mask = cv2.bitwise_and(color_mask, chan_mask)
+    elif np.sum(color_mask) < 10000 and np.sum(chan_mask) < 20000:
+        color_mask = cv2.bitwise_or(color_mask, chan_mask)
+    else:
+        color_mask = cv2.bitwise_or(color_mask, chan_mask)    
+    combined = abs_sobel_thresh(color_mask, 'x', sobel_kernel=5, thresh=(15, 255))       
+    combined[:, :300] = 0
+    combined[:, 1100:] = 0 
+    return combined
+```
+
+![alt text][image3]
+
+#### 4. Identify lane pixel and fit lane curve.
+
+I applied sliding windows to find lane pixels. I adjusted the center of the windows to be the mean of non-zero points inside the window. The code can be found at line 7 to 56 in lane_fitting.py, `sliding_window`.  
+Then I fitted lane curve using `numpy.polyfit` on lane pixels. 
+
+![image4]
+
+#### 5. Calculate curvature of the lanes and car offset from lane center.
+
+I assumed the conversion metrics from pixel to real-world to be 30 / 720 for y axis and 3.7 / 500 for x axis. The numbers were based US-road specification. I converted pixel coordination to world coordination then calculated lane curvature. I calculated car offset by assuming image center as car center then substracting it from center of two fitted lanes.   
+The code can be found in lines 59 through 84 in my code in `lanefitting.py`
+
+#### 6. Plot calculated lane back to original images.
+
+I implemented this step in lines 87 through 110 in my code in `lanefitting.py` in the function `weighted_lane()`.  Here is an example of my result on a test image:
+
+![alt text][image5]
+
+---
+
+### Pipeline (video)
+
+#### 1. Provide a link to your final video output.  Your pipeline should perform reasonably well on the entire project video (wobbly lines are ok but no catastrophic failures that would cause the car to drive off the road!).
+
+I wrote `continuous_pipeline()` in `lane_fitting.py`, lines 185 to 261 to process video.  
+The result can be seen at:
+
+[project_movie](https://github.com/trivus/CarND-Advanced-Lane-Lines/blob/master/result.mp4)
+
+---
+
+### Discussion
+
+#### 1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
+
+My pipeline worked considerably well on project video, but was not robust enough for challenge videos. I could adjust binarize function to work better on those videos, but not without sacrificing performance on project video.  
+This is due to hard-coded thresholds in binarize function. The videos differ in overall brightness, shadows, noise etc. to extent that simple masking method can not handle. The problem may be mitigated by using more sophisticated CV techniques, such as shadow removal. I tested one simple shadow removal technique, which is to apply histogram equalization on YUV space's Y channel, which indeed improved pipelines'performance on shadowed images, but was not included in final pipeline as it messed up clean images.  
+In conclusion, I found it hard to find an algorithm that works well on all three videos. I guess this is why convolution networks is gaining dominance today, as it can deal better with noisy sources.  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

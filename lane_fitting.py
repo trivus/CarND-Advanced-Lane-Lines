@@ -4,7 +4,7 @@ from utility import *
 from collections import deque
 
 
-def sliding_window(img, offsets, min_pix=5, margin=50, nwindow=9, out_img=None):
+def sliding_window(img, offsets, min_pix=2, margin=50, nwindow=9, out_img=None):
     """
     get hot pixels using sliding window method on binarized image
     :param img: binarized image 
