@@ -103,8 +103,8 @@ def dir_threshold(image, sobel_kernel=3, thresh=(0, np.pi/2)):
     return dir_binary
 
 
-def yellow_mask(img):
-    yellow_lower = np.array([10, 00, 30])
+def yellow_mask(img, sensitivity=100):
+    yellow_lower = np.array([10, 0, 255-sensitivity])
     yellow_upper = np.array([40, 255, 255])
     return cv2.inRange(img, yellow_lower, yellow_upper) // 255
 

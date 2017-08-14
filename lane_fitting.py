@@ -4,7 +4,7 @@ from utility import *
 from collections import deque
 
 
-def sliding_window(img, offsets, min_pix=2, margin=50, nwindow=9, out_img=None):
+def sliding_window(img, offsets, min_pix=2, margin=70, nwindow=9, out_img=None):
     """
     get hot pixels using sliding window method on binarized image
     :param img: binarized image 
@@ -152,7 +152,7 @@ class Line:
     def update(self, xs, ys, offset):
         if len(xs) < 5:
             self.bad_frame_count += 1
-            if self.bad_frame_count > 5:
+            if self.bad_frame_count > 10:
                 self.allxs.clear()
                 self.allys.clear()
 
@@ -194,7 +194,7 @@ class continuous_pipeline:
     def pipeline(self, img, debug=True):
         """
         pipeline function for undistort, binarize, fit and output process
-        :param img: BGR format
+        :param img: RGB format
         :return: 
         """
         # Define conversions in x and y from pixels space to meters
@@ -209,8 +209,8 @@ class continuous_pipeline:
         Minv = np.linalg.inv(M)
 
         # binarize
-        gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-        hls = cv2.cvtColor(warped, cv2.COLOR_BGR2HLS)
+        gray = cv2.cvtColor(warped, cv2.COLOR_RGB2GRAY)
+        hls = cv2.cvtColor(warped, cv2.COLOR_RGB2HLS)
 
         combined = self.binarize_function(gray, hls)
 
@@ -228,15 +228,16 @@ class continuous_pipeline:
         left_ys, left_xs, _, l_offsets = sliding_window(combined, leftx_base)
         right_ys, right_xs, _, r_offsets = sliding_window(combined, rightx_base)
 
+
         curvel = calculate_curve(left_xs, left_ys, xm_per_pix, ym_per_pix)
         curver = calculate_curve(right_xs, right_ys, xm_per_pix, ym_per_pix)
 
         # sanity checks
-        if min(np.subtract(r_offsets, l_offsets)) < 200 or max(np.subtract(r_offsets, l_offsets)) > 800:
-            left_xs = []
-            left_ys = []
-            right_xs = []
-            right_ys = []
+        #if min(np.subtract(r_offsets, l_offsets)) < 200 or max(np.subtract(r_offsets, l_offsets)) > 800:
+        #    left_xs = []
+        #    left_ys = []
+        #    right_xs = []
+        #    right_ys = []
 
 
         self.lline.update(left_xs, left_ys, l_offsets)
